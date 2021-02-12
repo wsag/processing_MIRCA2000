@@ -39,74 +39,140 @@ library(rgdal)
 library(rgeos)
 
 #############################################################################################################################
-### test
-crop_cal = data.frame(read.delim("data_in/growing_periods_listed/CELL_SPECIFIC_CROPPING_CALENDARS.TXT", header = T))
-cell_grid = raster("data_in/cell_area_grid/cell_area_ha_05mn.asc")
-#############################################################################################################################
-### MAIN calendar_to_grid() ###
-calendar_to_grid = function(crop_cal,      # crop_cal = data frame, loaded from the MIRCA2000 CELL_SPECIFIC_CROPPING_CALDENAR (either 5 min or 30 min)
+### calendar_to_grid() ###
+calendar_to_grid = function(crp,           # number from 1 to 52 (crop category)
+                            subcrp,        # number, from 1 5 (subcrop category, must have a matching crp category)
+                            crop_cal,      # crop_cal = data frame, loaded from the MIRCA2000 CELL_SPECIFIC_CROPPING_CALDENAR (either 5 min or 30 min),
+                                           # ONLY including columns: Cell_ID, crop, subcrop, and the data to be rasterized (e.g., area)
+                                           # DATA TO BE RASTERIZED MUST BE IN THE 4TH COLUMN
                             cell_grid,     # raster grid matching the spatial resolution of the crop_cal
+                            crop_codes,    # file crop_codes.txt, listing the crop name (e.g., Wheat) that goes with each crop category number
+                            varname,       # character string: variable name for netcdf file
+                            varunit,       # character string: variable unit for writing to netcdf file (e.g., ha)
+                            out.dir,       # character string: directory to write output file
                             check.file = 0 # binary: if 1, then check if output file exists. If it exists, do not overwrite
                             ){
   
-  # list all possible grid cell values
-  all_cell_ids = data.frame(seq(1, ncell(cell_grid)))
-  colnames(all_cell_ids)[1] = "Cell_ID"
+  ### If check.file = 1, then first check if file exists before processing
   
-  # loop through crops
-  for(crp in 1:52){
+  # identify crop type as Irr or Rfd for use in file name
+  if(crp < 27){ 
+    crop.type = "Irr"
+  }else{ 
+    crop.type = "Rfd"
+  }
+  file.nm = paste(out.dir, crop.type, "_crop_", crp, "_sub_", subcrp, "_area_ha.nc", sep="")
+  
+  if(check.file == 1 & exists(file.nm)){
+    print(paste(file.nm, "already exists. No new file written"))
     
-    # subset crop_cal to data with crp
+  }else{
+    # list all possible grid cell values
+    all_cell_ids = data.frame(seq(1, ncell(cell_grid)))
+    colnames(all_cell_ids)[1] = "Cell_ID"
+    
+    
+    # subset crop_cal to data with crp and subcrp
     crop_cal.sub = subset(crop_cal, crop_cal$crop == crp)
+    crop_cal.sub = subset(crop_cal.sub, crop_cal.sub$subcrop == subcrp)
     
-    # calculate number of subcrops
-    n.subcrp = length(unique(crop_cal.sub$subcrop))
-    
-    # loop through subcrops
-    if(n.subcrp > 1){
-      for(s in 1:n.subcrp)
-        crop_cal.sub = subset(crop_cal.sub, crop_cal.sub$subcrop == s)
-    }
-    
-  
     # merge with all possible cell IDs
     crop_cal.sub.merge = merge(all_cell_ids, crop_cal.sub, by = "Cell_ID", all=T)
     
-    test = subset(crop_cal.sub.merge, crop_cal.sub.merge$)
-    
-    
-    
-    # subset to area data only
-    crop_cal.sub_area = crop_cal.sub.merge[, c('lat', 'long', 'area')]  # subset to only the lat, long, and area data
-    
-    # rasterize
-    empty_grid = cell_grid
-    values(empty_grid) = NA
-    values(empty_grid) = crop_cal.sub.merge$area
-    
-    test = rasterFromXYZ(crop_cal.sub_area, res=res(cell_grid))
-    
-    coordinates(crop_cal.sub_area) = ~ long + lat                 # set coordinates
-    gridded(crop_cal.sub_area) = TRUE                             # make the data frame a SpatialPixelsDataFrame (gridded)
-    
-    
-    new_grid = cover(empty_grid, crop_cal.sub_area)
-    
-  }
-}   
+    # test that crop_cal.sub.merge has the correct number of rows
+    check.rows = nrow(crop_cal.sub.merge) == nrow(all_cell_ids)
+    if(check.rows == T){
+      
+      # rasterize
+      out_grid = cell_grid
+      values(out_grid) = NA
+      values(out_grid) = crop_cal.sub.merge[,4]
+      projection(out_grid) = "+proj=utm +zone=48 +datum=WGS84"  # set the spatial projection 
+      
+      # identify crop name (e.g., Wheat) that goes with the crop code, include in long name
+      crp.name = as.character(crop_codes[(which(crop_codes[,1:2] == crp) %% 26), 3])
+      
+      ### save raster file
+      writeRaster(out_grid, 
+                  file.nm,
+                  format    ="CDF", 
+                  varname   = varname, 
+                  longname  = paste("MIRCA2000", varname, "for crop ", crp, "(", crp.name, ") subcrop", subcrp), 
+                  varunit   = varunit, 
+                  overwrite = T)
+      
+      print(paste(file.nm, "written"))
+      
+    }else{
+      # if the merge did not result in the correct number of values
+      print(paste("merge error in crop", crp, "subcrop", s))
+      
+    } # end if/else loop on check.rows
+  } # end if/else loop on check.file
+} # end function
 
 
+#############################################################################################################################
+### MAIN ###
+#############################################################################################################################
+# load data
+crop_cal.full = data.frame(read.delim("data_in/growing_periods_listed/CELL_SPECIFIC_CROPPING_CALENDARS.TXT", header = T))
+crop_codes = read.delim("data_in/crop_codes.txt", skip = 3, header = T)
+cell_grid = raster("data_in/cell_area_grid/cell_area_ha_05mn.asc")
+
+# make a table of all possible crop/subcrop combos
+crop_combos = subset(crop_cal.full, select = c("crop", "subcrop"))
+crop_combos.u = unique(crop_combos)
+
+### 1. Rasterize cropland area (ha)
+# subset crop_cal.full to include only required data (area must be 4th column)
+crop_cal.area = subset(crop_cal.full, select = c("Cell_ID", "crop", "subcrop", "area"))
+
+# use mapply to loop through all crp and subcrp combos, applying calendar_to_grid() to each
+mapply(calendar_to_grid,
+       crp      = crop_combos.u$crop,
+       subcrp   = crop_combos.u$subcrop,
+       MoreArgs = list(crop_cal   = crop_cal.area,
+                       cell_grid  = cell_grid,
+                       crop_codes = crop_codes,
+                       varname    = "cropland_area",
+                       varunit    = "ha",
+                       out.dir    = "data_out/crop_physical_area_grids/")
+       
+)
 
 
-# example 2: list of lat, long, data
-coordinates(ld) <- ~ lons + lats                                  # identify the coordinates
-gridded(ld) <- TRUE                                               # make the data frame a SpatialPixelsDataFrame (gridded)
-raster.ld <- raster(ld)                                           # coerce to raster 
-projection(raster.ld) <- "+proj=utm +zone=48 +datum=WGS84"        # set the spatial projection (this is the default projection)
-values(raster.ld)<-c(ld$irrExtra)                                 # set raster grid cell values
+### 2. Rasterize planting month
+# subset crop_cal.full to include only required data (start must be 4th column)
+crop_cal.start = subset(crop_cal.full, select = c("Cell_ID", "crop", "subcrop", "start"))
+
+# use mapply to loop through all crp and subcrp combos, applying calendar_to_grid() to each
+mapply(calendar_to_grid,
+       crp      = crop_combos.u$crop,
+       subcrp   = crop_combos.u$subcrop,
+       MoreArgs = list(crop_cal   = crop_cal.start,
+                       cell_grid  = cell_grid,
+                       crop_codes = crop_codes,
+                       varname    = "planting_month",
+                       varunit    = "month",
+                       out.dir    = "data_out/planting_month")
+       
+)
 
 
-# values(raster) = data: this fills in all grid cells in order from northwest to southeast 
+### 3. Rasterize harvest month
+# subset crop_cal.full to include only required data (end must be 4th column)
+crop_cal.end = subset(crop_cal.full, select = c("Cell_ID", "crop", "subcrop", "end"))
 
-
-
+# use mapply to loop through all crp and subcrp combos, applying calendar_to_grid() to each
+mapply(calendar_to_grid,
+       crp      = crop_combos.u$crop,
+       subcrp   = crop_combos.u$subcrop,
+       MoreArgs = list(crop_cal   = crop_cal.end,
+                       cell_grid  = cell_grid,
+                       crop_codes = crop_codes,
+                       varname    = "harvest_month",
+                       varunit    = "month",
+                       out.dir    = "data_out/harvest_month")
+       
+)
