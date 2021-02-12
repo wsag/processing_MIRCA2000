@@ -87,7 +87,7 @@ calendar_to_grid = function(crp,           # number from 1 to 52 (crop category)
       out_grid = cell_grid
       values(out_grid) = NA
       values(out_grid) = crop_cal.sub.merge[,4]
-      projection(out_grid) = "+proj=utm +zone=48 +datum=WGS84"  # set the spatial projection 
+      projection(out_grid) = "+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs"  # set the spatial projection 
       
       # identify crop name (e.g., Wheat) that goes with the crop code, include in long name
       crp.name = as.character(crop_codes[(which(crop_codes[,1:2] == crp) %% 26), 3])
