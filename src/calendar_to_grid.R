@@ -61,7 +61,7 @@ calendar_to_grid = function(crp,           # number from 1 to 52 (crop category)
   }else{ 
     crop.type = "Rfd"
   }
-  file.nm = paste(out.dir, crop.type, "_crop_", crp, "_sub_", subcrp, "_area_ha.nc", sep="")
+  file.nm = paste(out.dir, crop.type, "_crop_", crp, "_sub_", subcrp, "_", varname, ".nc", sep="")
   
   if(check.file == 1 & exists(file.nm)){
     print(paste(file.nm, "already exists. No new file written"))
@@ -155,7 +155,7 @@ mapply(calendar_to_grid,
                        crop_codes = crop_codes,
                        varname    = "planting_month",
                        varunit    = "month",
-                       out.dir    = "data_out/planting_month")
+                       out.dir    = "data_out/planting_month/")
        
 )
 
@@ -173,6 +173,6 @@ mapply(calendar_to_grid,
                        crop_codes = crop_codes,
                        varname    = "harvest_month",
                        varunit    = "month",
-                       out.dir    = "data_out/harvest_month")
+                       out.dir    = "data_out/harvest_month/")
        
 )
